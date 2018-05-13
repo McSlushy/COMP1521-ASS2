@@ -34,6 +34,9 @@ static int   nFree;                                                         // n
 static void sortFreeList();
 static int findSmallestChunk(int size);
 static void organiseNULL(int index);
+static int findAddressInFreeList(void *address);
+static void adjacentLeft(int index, void *address);
+static void adjacentRight(int index, void *address);
 
 // initialise heap
 int initHeap(int size) {
@@ -96,12 +99,35 @@ void *myMalloc(int size) {
         sortFreeList();                                                     // sort the freeList array to ensure ascending address order
     }
     
-    return curr;
+    return curr + 8;
 }
 
 // free a chunk of memory
 void myFree(void *block) {
+    block = (Addr) ((char *)block - 8);
+    if (block == NULL || (Header *)block->status != ALLOC) {                // return error if block is an allocated chunk or if the address is not the start of a data block
+        fprintf(stderr,"Attempt to free unallocated chunk\n");
+        exit(1);
+    }
     
+    (Header *)block->status = FREE;                                         // release allocated chunk
+    freeList[nFree] = block;                                                // place new free chunk into freeList array
+    nFree++;
+    sortFreeList();                                                         // sort the freeList array to ensure ascending address order
+    int index = findInFreeList(block);
+    
+    if (nFree != 1) {
+        Addr check = block;
+        if (index == 0) {
+            adjacentRight(index,block);
+        } else if (index == (nFree - 1)) {
+            adjacentLeft(index,block);
+        } else {
+            block = adjacentLeft(index,block);
+            if (block == check) adjacentRight(index,block);
+            else adjacentRight(index-1,block);
+        }
+    }
 }
 
 // convert pointer to offset in heapMem
@@ -168,11 +194,54 @@ static int findSmallestChunk(int size) {
     return index;
 }
 
-// Given index of a NULL address, this function moves it to the back of the freeList array
+// given index of a NULL address, this function moves it to the back of the freeList array
 static void organiseNULL(int index) {
     for (int i = index; i < freeElems; i++) {
         if (freeList[i+1] == NULL) break;
         freeList[i] = freeList[i+1];
         freeList[i+1] = NULL;
     }
+}
+
+// given the start address of a free-space chunk, return its index in the freeList array
+static int findInFreeList(void *address) {
+    for (int i = 0; i < nFree; i++) {
+        Addr curr = heapMem;
+        uint offset = (unit) heapOffset(freeList[i]);                       // get address offset of chunk from heapMem
+        curr = (Addr) ((char *)curr + offset);                              // add offset to get address of chunk
+        if (curr == address) return i;
+    }
+}
+
+// check if the next free chunk on the left of the given free chunk is adjacent to it, and if so, merge them
+static void adjacentLeft(int index, void *address) {
+    Addr curr = heapMem;
+    uint offset = (unit) heapOffset(freeList[index-1]);                     // get address offset of chunk from heapMem
+    curr = (Addr) ((char *)curr + offset);                                  // add offset to get address of chunk
+    uint difference = (unit) (address - curr);                              // get offset between the base addresses of the chunks
+    if ((Header *)curr->size == difference) {
+        (Header *)curr->size += (Header *)address->size;                    // merge free chunks together
+        freeList[index] = NULL;                                             // remove reference to adjacent chunk
+        nFree--;
+        organiseNULL(index);                                                // move new NULL entry to back of array to retain sorted ascending address order
+        address = curr;                                                     // set address to the address of the previous left adjacent chunk
+    }
+    
+    return address;
+}
+
+// check if the next free chunk on the right of the given free chunk is adjacent to it, and if so, merge them
+static void adjacentRight(int index, void *address) {
+    Addr curr = heapMem;
+    uint offset = (unit) heapOffset(freeList[index+1]);                     // get address offset of chunk from heapMem
+    curr = (Addr) ((char *)curr + offset);                                  // add offset to get address of chunk
+    uint difference = (unit) (curr - address);                              // get offset between the base addresses of the chunks
+    if ((Header *)address->size == difference) {
+        (Header *)address->size += (Header *)curr->size;                    // merge free chunks together
+        freeList[index+1] = NULL;                                           // remove reference to adjacent chunk
+        nFree--;
+        organiseNULL(index+1);                                              // move new NULL entry to back of array to retain sorted ascending address order
+    }
+    
+    return address;
 }
