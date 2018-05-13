@@ -81,7 +81,7 @@ void *myMalloc(int size) {
     
     Addr curr = heapMem;
     Header *temp = (Header *)freeList[index];
-    if (temp->size <= (size + 8 + MIN_CHUNK)) {                             // allocate entire chunk if there would be no excess free space left over
+    if (temp->size <= (size + 8)) {                                         // allocate entire chunk if there would be no excess free space left over
         uint oldSize = temp->size;                                          // get size of the chunk to be malloced
         uint offset = (uint) heapOffset(freeList[index]);                   // get address offset of chunk from heapMem
         curr = (Addr) ((char *)curr + offset);                              // add offset to get address of chunk
@@ -92,14 +92,14 @@ void *myMalloc(int size) {
         nFree--;
         organiseNULL(index);                                                // move new NULL entry to back of array to retain sorted ascending address order
     } else {                                                                // split large chunk into a allocated chunk for the request the rest as free space
-        uint freeSize = temp->size - (size + 8 + MIN_CHUNK);                // calculate free space excess from split
+        uint freeSize = temp->size - (size + 8);                            // calculate free space excess from split
         uint offset = (uint) heapOffset(freeList[index]);                   // get address offset of malloced lower chunk from heapMem
         curr = (Addr) ((char *)curr + offset);                              // add offset to get address of malloced lower chunk
         Header *newHeader = (Header *)curr;
         newHeader->status = ALLOC;
-        newHeader->size = size + 8 + MIN_CHUNK;
+        newHeader->size = size + 8;
         
-        Addr curr2 = (Addr) ((char *)curr + (size + 8 + MIN_CHUNK));        // add size of lower chunk to get address of upper chunk
+        Addr curr2 = (Addr) ((char *)curr + (size + 8));                    // add size of lower chunk to get address of upper chunk
         Header *newHeader2 = (Header *)curr2;
         newHeader2->status = FREE;
         newHeader2->size = freeSize;
@@ -114,8 +114,8 @@ void *myMalloc(int size) {
 void myFree(void *block) {
     block = (Addr) ((char *)block - 8);
     Header *temp = (Header *)block;
-    if (block == NULL || temp->status != ALLOC) {                           // return error if block is an allocated chunk or if the address is not the start of a data block
-        fprintf(stderr,"Attempt to free unallocated chunk\n");
+    if (block == NULL || temp->status != ALLOC) {
+        fprintf(stderr,"Attempt to free unallocated chunk\n");              // return error if block is an allocated chunk or if the address is not the start of a data block
         exit(1);
     }
     
