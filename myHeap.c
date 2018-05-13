@@ -44,7 +44,7 @@ int initHeap(int size) {
     int remainder = size % 4;
     if (remainder != 0) size = size + 4 - remainder;                        // round up to nearest multiple of 4 if not divisible by 4
     
-    (char *)heapMem = (char *)malloc(size*sizeof(char));                    // set heapMem to first byte of malloc'd region
+    heapMem = (char *)malloc(size*sizeof(char));                            // set heapMem to first byte of malloc'd region
     if (heapMem == NULL) return -1;
     memset((char *)heapMem,'\0',size);                                      // zeroes out entire region
     heapSize = size;
@@ -56,9 +56,10 @@ int initHeap(int size) {
         freeList[i] = NULL;
     }
     
-    Addr curr = heapMem;
-    (Header *)curr = {FREE,size};                                           // initialise region to be a single large free-space chunk
-    freeList[0] = curr;                                                     // set first item in freeList array to the single free-space chunk
+    Header *newHeader = (Header *)heapMem;                                  // initialise region to be a single large free-space chunk
+    newHeader->status = FREE;
+    newHeader->size = size;
+    freeList[0] = heapMem;                                                  // set first item in freeList array to the single free-space chunk
     nFree = 1;
     
     return 0;
@@ -79,22 +80,29 @@ void *myMalloc(int size) {
     if (index == -1) return NULL;                                           // cannot malloc if only inadequately sized chunks available
     
     Addr curr = heapMem;
-    if (freeList[index]->size <= (size + 8 + MIN_CHUNK) {                   // allocate entire chunk if there would be no excess free space left over
-        uint oldSize = (Header *)freeList[i]->size;                         // get size of the chunk to be malloced
-        uint offset = (unit) heapOffset(freeList[index]);                   // get address offset of chunk from heapMem
+    Header *temp = (Header *)freeList[index];
+    if (temp->size <= (size + 8 + MIN_CHUNK)) {                             // allocate entire chunk if there would be no excess free space left over
+        uint oldSize = temp->size;                                          // get size of the chunk to be malloced
+        uint offset = (uint) heapOffset(freeList[index]);                   // get address offset of chunk from heapMem
         curr = (Addr) ((char *)curr + offset);                              // add offset to get address of chunk
-        (Header *)curr = {ALLOC,oldSize};
+        Header *newHeader = (Header *)curr;
+        newHeader->status = ALLOC;
+        newHeader->size = oldSize;
         freeList[index] = NULL;
         nFree--;
         organiseNULL(index);                                                // move new NULL entry to back of array to retain sorted ascending address order
     } else {                                                                // split large chunk into a allocated chunk for the request the rest as free space
-        uint freeSize = freeList[index]->size - (size + 8 + MIN_CHUNK);     // calculate free space excess from split
-        uint offset = (unit) heapOffset(freeList[index]);                   // get address offset of malloced lower chunk from heapMem
+        uint freeSize = temp->size - (size + 8 + MIN_CHUNK);                // calculate free space excess from split
+        uint offset = (uint) heapOffset(freeList[index]);                   // get address offset of malloced lower chunk from heapMem
         curr = (Addr) ((char *)curr + offset);                              // add offset to get address of malloced lower chunk
-        (Header *)curr = {ALLOC,(size + 8 + MIN_CHUNK)};
+        Header *newHeader = (Header *)curr;
+        newHeader->status = ALLOC;
+        newHeader->size = size + 8 + MIN_CHUNK;
         
         Addr curr2 = (Addr) ((char *)curr + (size + 8 + MIN_CHUNK));        // add size of lower chunk to get address of upper chunk
-        (Header *)curr2 = {FREE,freeSize};
+        Header *newHeader2 = (Header *)curr2;
+        newHeader2->status = FREE;
+        newHeader2->size = freeSize;
         freeList[index] = curr2;                                            // replace old free space chunk with the new one
         sortFreeList();                                                     // sort the freeList array to ensure ascending address order
     }
@@ -105,27 +113,26 @@ void *myMalloc(int size) {
 // free a chunk of memory
 void myFree(void *block) {
     block = (Addr) ((char *)block - 8);
-    if (block == NULL || (Header *)block->status != ALLOC) {                // return error if block is an allocated chunk or if the address is not the start of a data block
+    Header *temp = (Header *)block;
+    if (block == NULL || temp->status != ALLOC) {                           // return error if block is an allocated chunk or if the address is not the start of a data block
         fprintf(stderr,"Attempt to free unallocated chunk\n");
         exit(1);
     }
     
-    (Header *)block->status = FREE;                                         // release allocated chunk
+    temp->status = FREE;                                                    // release allocated chunk
     freeList[nFree] = block;                                                // place new free chunk into freeList array
     nFree++;
     sortFreeList();                                                         // sort the freeList array to ensure ascending address order
-    int index = findInFreeList(block);
+    int index = findAddressInFreeList(block);
     
     if (nFree != 1) {
-        Addr check = block;
         if (index == 0) {
             adjacentRight(index,block);
         } else if (index == (nFree - 1)) {
             adjacentLeft(index,block);
         } else {
-            block = adjacentLeft(index,block);
-            if (block == check) adjacentRight(index,block);
-            else adjacentRight(index-1,block);
+            adjacentRight(index,block);
+            adjacentLeft(index,block);
         }
     }
 }
@@ -183,11 +190,15 @@ static void sortFreeList() {
 // returns the index of the samllest usable chunk in FreeList, if none can be found -1 is returned instead
 static int findSmallestChunk(int size) {
     int index = -1;
+    Header *temp, *check;
     
     for (int i = 0; i < nFree; i++) {
-        if ((Header *)freeList[i]->size >= (size + 8)) {
-            if (index == -1) index = i;
-            else if ((Header *)freeList[index]->size > (Header *)freeList[i]->size) index = i;
+        temp = (Header *)freeList[i];
+        if (temp->size >= (size + 8)) {
+            if (index == -1 || check->size > temp->size) {
+                index = i;
+                check = (Header *)freeList[index];
+            }
         }
     }
     
@@ -204,44 +215,46 @@ static void organiseNULL(int index) {
 }
 
 // given the start address of a free-space chunk, return its index in the freeList array
-static int findInFreeList(void *address) {
+static int findAddressInFreeList(void *address) {
     for (int i = 0; i < nFree; i++) {
         Addr curr = heapMem;
-        uint offset = (unit) heapOffset(freeList[i]);                       // get address offset of chunk from heapMem
+        uint offset = (uint) heapOffset(freeList[i]);                       // get address offset of chunk from heapMem
         curr = (Addr) ((char *)curr + offset);                              // add offset to get address of chunk
         if (curr == address) return i;
     }
+    
+    return 0;
 }
 
 // check if the next free chunk on the left of the given free chunk is adjacent to it, and if so, merge them
 static void adjacentLeft(int index, void *address) {
     Addr curr = heapMem;
-    uint offset = (unit) heapOffset(freeList[index-1]);                     // get address offset of chunk from heapMem
+    uint offset = (uint) heapOffset(freeList[index-1]);                     // get address offset of chunk from heapMem
     curr = (Addr) ((char *)curr + offset);                                  // add offset to get address of chunk
-    uint difference = (unit) (address - curr);                              // get offset between the base addresses of the chunks
-    if ((Header *)curr->size == difference) {
-        (Header *)curr->size += (Header *)address->size;                    // merge free chunks together
+    uint difference = (uint) (address - curr);                              // get offset between the base addresses of the chunks
+    
+    Header *temp = (Header *)curr, *base = (Header *)address;
+    if (temp->size == difference) {
+        temp->size += base->size;                                           // merge free chunks together
         freeList[index] = NULL;                                             // remove reference to adjacent chunk
         nFree--;
         organiseNULL(index);                                                // move new NULL entry to back of array to retain sorted ascending address order
         address = curr;                                                     // set address to the address of the previous left adjacent chunk
     }
-    
-    return address;
 }
 
 // check if the next free chunk on the right of the given free chunk is adjacent to it, and if so, merge them
 static void adjacentRight(int index, void *address) {
     Addr curr = heapMem;
-    uint offset = (unit) heapOffset(freeList[index+1]);                     // get address offset of chunk from heapMem
+    uint offset = (uint) heapOffset(freeList[index+1]);                     // get address offset of chunk from heapMem
     curr = (Addr) ((char *)curr + offset);                                  // add offset to get address of chunk
-    uint difference = (unit) (curr - address);                              // get offset between the base addresses of the chunks
-    if ((Header *)address->size == difference) {
-        (Header *)address->size += (Header *)curr->size;                    // merge free chunks together
+    uint difference = (uint) (curr - address);                              // get offset between the base addresses of the chunks
+    
+    Header *temp = (Header *)curr, *base = (Header *)address;
+    if (base->size == difference) {
+        base->size += temp->size;                                           // merge free chunks together
         freeList[index+1] = NULL;                                           // remove reference to adjacent chunk
         nFree--;
         organiseNULL(index+1);                                              // move new NULL entry to back of array to retain sorted ascending address order
     }
-    
-    return address;
 }
